@@ -36,7 +36,13 @@ impl CandidateKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CleanupPolicy {
     ClearContents,
-    StalePasteboardArchives { min_age: Duration },
+    MatchingFiles {
+        extensions: &'static [&'static str],
+        min_age: Duration,
+    },
+    StalePasteboardArchives {
+        min_age: Duration,
+    },
     Never,
 }
 
@@ -100,6 +106,7 @@ pub fn home_dir() -> Result<PathBuf> {
 
 pub fn default_candidates(home: &Path) -> Vec<CandidateSpec> {
     let caches = home.join("Library/Caches");
+    let application_support = home.join("Library/Application Support");
     vec![
         CandidateSpec {
             id: "shared-pasteboard",
@@ -114,11 +121,75 @@ pub fn default_candidates(home: &Path) -> Vec<CandidateSpec> {
             },
         },
         CandidateSpec {
+            id: "google-cache",
+            name: "Chrome 用户缓存",
+            path: caches.join("Google"),
+            description: "Chrome 可重建缓存；清理前请退出 Chrome",
+            kind: CandidateKind::Recommended,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "chrome-on-device-model",
+            name: "Chrome 本地 AI 模型",
+            path: application_support.join("Google/Chrome/OptGuideOnDeviceModel"),
+            description: "Chrome 按需下载的本地模型；需要时可能重新下载",
+            kind: CandidateKind::Recommended,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "google-updater-cache",
+            name: "Google Updater 缓存",
+            path: application_support.join("Google/GoogleUpdater/crx_cache"),
+            description: "Google 更新下载缓存；清理前请退出 Chrome",
+            kind: CandidateKind::Recommended,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "chrome-service-worker-cache",
+            name: "Chrome 站点缓存",
+            path: application_support.join("Google/Chrome/Default/Service Worker/CacheStorage"),
+            description: "站点 Service Worker 缓存；可能影响离线网页，不清除登录信息",
+            kind: CandidateKind::Recommended,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "davinci-cache-clip",
+            name: "DaVinci 渲染缓存",
+            path: home.join("Movies/DaVinci Resolve/CacheClip"),
+            description: "可重新生成的 CacheClip；清理前请退出 DaVinci Resolve",
+            kind: CandidateKind::Recommended,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "codex-runtime-cache",
+            name: "Codex runtime 缓存",
+            path: home.join(".cache/codex-runtimes"),
+            description: "文档等功能的运行时缓存；需要时会重新下载",
+            kind: CandidateKind::Recommended,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "codex-cache",
+            name: "Codex/ChatGPT 应用缓存",
+            path: caches.join("com.openai.codex"),
+            description: "可重建的应用缓存；清理前请退出 ChatGPT/Codex",
+            kind: CandidateKind::Optional,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
             id: "adobe-camera-raw",
             name: "Adobe Camera Raw 2",
             path: caches.join("Adobe Camera Raw 2"),
             description: "Adobe Camera Raw 可重建缓存；建议先退出 Adobe 应用",
             kind: CandidateKind::Optional,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "lightroom-cache",
+            name: "Lightroom Classic 缓存",
+            path: caches.join("com.adobe.LightroomClassicCC7"),
+            description: "Lightroom 可重建缓存；清理前请退出 Lightroom",
+            kind: CandidateKind::Recommended,
             policy: CleanupPolicy::ClearContents,
         },
         CandidateSpec {
@@ -130,18 +201,42 @@ pub fn default_candidates(home: &Path) -> Vec<CandidateSpec> {
             policy: CleanupPolicy::ClearContents,
         },
         CandidateSpec {
-            id: "google-cache",
-            name: "Google 应用缓存",
-            path: caches.join("Google"),
-            description: "Chrome 等 Google 应用的可重建缓存",
+            id: "adobe-logs",
+            name: "Adobe 日志",
+            path: home.join("Library/Logs/Adobe"),
+            description: "Adobe 诊断日志；清理前请退出 Adobe 应用",
+            kind: CandidateKind::Recommended,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "cargo-registry",
+            name: "Cargo registry",
+            path: home.join(".cargo/registry"),
+            description: "Rust crate 下载缓存和解压源码；构建时会重新下载",
             kind: CandidateKind::Optional,
             policy: CleanupPolicy::ClearContents,
         },
         CandidateSpec {
-            id: "codex-cache",
-            name: "Codex/ChatGPT 缓存",
-            path: caches.join("com.openai.codex"),
-            description: "可重建的应用缓存；清理前请退出 ChatGPT/Codex",
+            id: "npm-cache",
+            name: "npm 缓存",
+            path: home.join(".npm/_cacache"),
+            description: "npm 包缓存；安装依赖时会重新下载",
+            kind: CandidateKind::Optional,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "pnpm-store",
+            name: "pnpm store",
+            path: home.join("Library/pnpm/store"),
+            description: "pnpm 内容寻址包仓库；清理后安装依赖会重新下载",
+            kind: CandidateKind::Optional,
+            policy: CleanupPolicy::ClearContents,
+        },
+        CandidateSpec {
+            id: "pnpm-cache",
+            name: "pnpm 元数据缓存",
+            path: caches.join("pnpm"),
+            description: "pnpm 可重建元数据缓存",
             kind: CandidateKind::Optional,
             policy: CleanupPolicy::ClearContents,
         },
@@ -154,12 +249,15 @@ pub fn default_candidates(home: &Path) -> Vec<CandidateSpec> {
             policy: CleanupPolicy::ClearContents,
         },
         CandidateSpec {
-            id: "dot-cache",
-            name: "用户 ~/.cache",
-            path: home.join(".cache"),
-            description: "开发工具缓存；可能导致下次构建或启动变慢",
+            id: "downloaded-installers",
+            name: "Downloads 安装包",
+            path: home.join("Downloads"),
+            description: "只删除顶层且超过 1 小时的 .dmg/.pkg；保留其他下载内容",
             kind: CandidateKind::Caution,
-            policy: CleanupPolicy::ClearContents,
+            policy: CleanupPolicy::MatchingFiles {
+                extensions: &["dmg", "pkg"],
+                min_age: PASTEBOARD_MIN_AGE,
+            },
         },
         CandidateSpec {
             id: "trash",
@@ -244,6 +342,14 @@ pub fn volume_usage() -> Result<VolumeUsage> {
 }
 
 pub fn scan_candidate(spec: &CandidateSpec) -> ScanResult {
+    if let CleanupPolicy::MatchingFiles {
+        extensions,
+        min_age,
+    } = spec.policy
+    {
+        return scan_matching_files(&spec.path, extensions, min_age);
+    }
+
     let mut result = ScanResult::default();
     let mut seen_files = HashSet::new();
 
@@ -258,6 +364,7 @@ pub fn scan_candidate(spec: &CandidateSpec) -> ScanResult {
 
     result.reclaimable_bytes = match spec.policy {
         CleanupPolicy::ClearContents => result.allocated_bytes,
+        CleanupPolicy::MatchingFiles { .. } => unreachable!("已在上方单独处理"),
         CleanupPolicy::Never => 0,
         CleanupPolicy::StalePasteboardArchives { min_age } => {
             result.open_handles = has_open_handles(&spec.path).unwrap_or(true);
@@ -269,6 +376,60 @@ pub fn scan_candidate(spec: &CandidateSpec) -> ScanResult {
         }
     };
     result
+}
+
+fn scan_matching_files(path: &Path, extensions: &[&str], min_age: Duration) -> ScanResult {
+    let mut result = ScanResult::default();
+    if !path.exists() {
+        return result;
+    }
+    let cutoff = SystemTime::now()
+        .checked_sub(min_age)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) => {
+            result.errors.push(format!("{}: {error}", path.display()));
+            return result;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        match fs::symlink_metadata(&entry_path) {
+            Ok(metadata)
+                if metadata.is_file()
+                    && !metadata.file_type().is_symlink()
+                    && has_extension(&entry_path, extensions)
+                    && metadata
+                        .modified()
+                        .map(|time| time <= cutoff)
+                        .unwrap_or(false) =>
+            {
+                result.files += 1;
+                result.allocated_bytes = result
+                    .allocated_bytes
+                    .saturating_add(allocated_size(&metadata));
+                result.logical_bytes = result.logical_bytes.saturating_add(metadata.len());
+            }
+            Ok(_) => {}
+            Err(error) => result
+                .errors
+                .push(format!("{}: {error}", entry_path.display())),
+        }
+    }
+    result.reclaimable_bytes = result.allocated_bytes;
+    result
+}
+
+fn has_extension(path: &Path, extensions: &[&str]) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extensions
+                .iter()
+                .any(|expected| extension.eq_ignore_ascii_case(expected))
+        })
 }
 
 fn accumulate_path(
@@ -371,6 +532,10 @@ pub fn clean_candidate(spec: &CandidateSpec, home: &Path) -> Result<u64> {
     match spec.policy {
         CleanupPolicy::Never => bail!("{} 被标记为受保护数据", spec.name),
         CleanupPolicy::ClearContents => clear_directory_contents(&spec.path)?,
+        CleanupPolicy::MatchingFiles {
+            extensions,
+            min_age,
+        } => remove_matching_files(&spec.path, extensions, min_age)?,
         CleanupPolicy::StalePasteboardArchives { min_age } => {
             if has_open_handles(&spec.path)? {
                 bail!("剪贴板归档正在被进程使用，已拒绝清理");
@@ -381,6 +546,32 @@ pub fn clean_candidate(spec: &CandidateSpec, home: &Path) -> Result<u64> {
 
     let after = scan_candidate(spec).reclaimable_bytes;
     Ok(before.saturating_sub(after))
+}
+
+fn remove_matching_files(path: &Path, extensions: &[&str], min_age: Duration) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let cutoff = SystemTime::now()
+        .checked_sub(min_age)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    for entry in fs::read_dir(path).with_context(|| format!("无法读取 {}", path.display()))? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        let metadata = fs::symlink_metadata(&entry_path)?;
+        if metadata.is_file()
+            && !metadata.file_type().is_symlink()
+            && has_extension(&entry_path, extensions)
+            && metadata
+                .modified()
+                .map(|time| time <= cutoff)
+                .unwrap_or(false)
+        {
+            fs::remove_file(&entry_path)
+                .with_context(|| format!("无法删除文件 {}", entry_path.display()))?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_cleanup_target(spec: &CandidateSpec, home: &Path) -> Result<()> {
@@ -596,6 +787,39 @@ mod tests {
         clean_candidate(&spec, &home)?;
         assert!(target.is_dir());
         assert_eq!(fs::read_dir(&target)?.count(), 0);
+        fs::remove_dir_all(home)?;
+        Ok(())
+    }
+
+    #[test]
+    fn matching_files_cleanup_only_removes_top_level_installers() -> Result<()> {
+        let home = test_dir("installers");
+        let downloads = home.join("Downloads");
+        fs::create_dir_all(downloads.join("nested"))?;
+        fs::write(downloads.join("app.dmg"), b"installer")?;
+        fs::write(downloads.join("update.PKG"), b"installer")?;
+        fs::write(downloads.join("notes.txt"), b"keep")?;
+        fs::write(downloads.join("nested/keep.dmg"), b"keep")?;
+        let spec = CandidateSpec {
+            id: "installer-test",
+            name: "installer-test",
+            path: downloads.clone(),
+            description: "test",
+            kind: CandidateKind::Caution,
+            policy: CleanupPolicy::MatchingFiles {
+                extensions: &["dmg", "pkg"],
+                min_age: Duration::ZERO,
+            },
+        };
+
+        let scan = scan_candidate(&spec);
+        assert_eq!(scan.files, 2);
+        assert!(scan.reclaimable_bytes > 0);
+        clean_candidate(&spec, &home)?;
+        assert!(!downloads.join("app.dmg").exists());
+        assert!(!downloads.join("update.PKG").exists());
+        assert!(downloads.join("notes.txt").exists());
+        assert!(downloads.join("nested/keep.dmg").exists());
         fs::remove_dir_all(home)?;
         Ok(())
     }

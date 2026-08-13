@@ -270,7 +270,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         } else if !item.scan.accessible() {
             "无权限".into()
         } else {
-            "0 B".into()
+            format_bytes(0)
         };
         let style = match item.spec.kind {
             CandidateKind::Recommended => Style::default().fg(Color::Green),
