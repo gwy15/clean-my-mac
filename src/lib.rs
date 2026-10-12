@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
-pub const PASTEBOARD_MIN_AGE: Duration = Duration::from_secs(60 * 60);
+pub const INSTALLER_MIN_AGE: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CandidateKind {
@@ -40,9 +40,7 @@ pub enum CleanupPolicy {
         extensions: &'static [&'static str],
         min_age: Duration,
     },
-    StalePasteboardArchives {
-        min_age: Duration,
-    },
+    PasteboardArchives,
     Never,
 }
 
@@ -114,11 +112,9 @@ pub fn default_candidates(home: &Path) -> Vec<CandidateSpec> {
             path: home.join(
                 "Library/Group Containers/group.com.apple.coreservices.useractivityd/shared-pasteboard/archives",
             ),
-            description: "只清理超过 1 小时、且未被进程使用的共享剪贴板归档",
+            description: "清理未被进程使用的共享剪贴板归档，不限制文件时间",
             kind: CandidateKind::Recommended,
-            policy: CleanupPolicy::StalePasteboardArchives {
-                min_age: PASTEBOARD_MIN_AGE,
-            },
+            policy: CleanupPolicy::PasteboardArchives,
         },
         CandidateSpec {
             id: "google-cache",
@@ -256,7 +252,7 @@ pub fn default_candidates(home: &Path) -> Vec<CandidateSpec> {
             kind: CandidateKind::Caution,
             policy: CleanupPolicy::MatchingFiles {
                 extensions: &["dmg", "pkg"],
-                min_age: PASTEBOARD_MIN_AGE,
+                min_age: INSTALLER_MIN_AGE,
             },
         },
         CandidateSpec {
@@ -366,12 +362,12 @@ pub fn scan_candidate(spec: &CandidateSpec) -> ScanResult {
         CleanupPolicy::ClearContents => result.allocated_bytes,
         CleanupPolicy::MatchingFiles { .. } => unreachable!("已在上方单独处理"),
         CleanupPolicy::Never => 0,
-        CleanupPolicy::StalePasteboardArchives { min_age } => {
+        CleanupPolicy::PasteboardArchives => {
             result.open_handles = has_open_handles(&spec.path).unwrap_or(true);
             if result.open_handles {
                 0
             } else {
-                reclaimable_direct_entries(&spec.path, min_age, &mut result.errors)
+                result.allocated_bytes
             }
         }
     };
@@ -484,37 +480,6 @@ fn allocated_size(metadata: &Metadata) -> u64 {
     metadata.blocks().saturating_mul(512)
 }
 
-fn reclaimable_direct_entries(path: &Path, min_age: Duration, errors: &mut Vec<String>) -> u64 {
-    let cutoff = SystemTime::now()
-        .checked_sub(min_age)
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-    let mut total = 0_u64;
-    let Ok(entries) = fs::read_dir(path) else {
-        return 0;
-    };
-    for entry in entries.flatten() {
-        match fs::symlink_metadata(entry.path()) {
-            Ok(metadata) => {
-                let old_enough = metadata
-                    .modified()
-                    .map(|time| time <= cutoff)
-                    .unwrap_or(false);
-                if old_enough {
-                    let mut scan = ScanResult::default();
-                    let mut seen = HashSet::new();
-                    if let Err(error) = accumulate_path(&entry.path(), &mut scan, &mut seen) {
-                        errors.push(format!("{}: {error}", entry.path().display()));
-                    } else {
-                        total = total.saturating_add(scan.allocated_bytes);
-                    }
-                }
-            }
-            Err(error) => errors.push(format!("{}: {error}", entry.path().display())),
-        }
-    }
-    total
-}
-
 fn has_open_handles(path: &Path) -> Result<bool> {
     let output = Command::new("/usr/sbin/lsof")
         .arg("+D")
@@ -536,11 +501,11 @@ pub fn clean_candidate(spec: &CandidateSpec, home: &Path) -> Result<u64> {
             extensions,
             min_age,
         } => remove_matching_files(&spec.path, extensions, min_age)?,
-        CleanupPolicy::StalePasteboardArchives { min_age } => {
+        CleanupPolicy::PasteboardArchives => {
             if has_open_handles(&spec.path)? {
                 bail!("剪贴板归档正在被进程使用，已拒绝清理");
             }
-            remove_stale_direct_entries(&spec.path, min_age)?;
+            clear_directory_contents(&spec.path)?;
         }
     }
 
@@ -607,27 +572,6 @@ fn clear_directory_contents(path: &Path) -> Result<()> {
     for entry in fs::read_dir(path).with_context(|| format!("无法读取 {}", path.display()))? {
         let entry = entry?;
         remove_entry(&entry.path())?;
-    }
-    Ok(())
-}
-
-fn remove_stale_direct_entries(path: &Path, min_age: Duration) -> Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let cutoff = SystemTime::now()
-        .checked_sub(min_age)
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-    for entry in fs::read_dir(path).with_context(|| format!("无法读取 {}", path.display()))? {
-        let entry = entry?;
-        let metadata = fs::symlink_metadata(entry.path())?;
-        if metadata
-            .modified()
-            .map(|time| time <= cutoff)
-            .unwrap_or(false)
-        {
-            remove_entry(&entry.path())?;
-        }
     }
     Ok(())
 }
@@ -768,25 +712,48 @@ mod tests {
     }
 
     #[test]
-    fn pasteboard_cleanup_keeps_archive_directory() -> Result<()> {
+    fn pasteboard_cleanup_includes_recent_archives_and_keeps_metadata() -> Result<()> {
         let home = test_dir("pasteboard");
-        let target = home.join("Library/Group Containers/test/shared-pasteboard/archives");
+        let spec = default_candidates(&home)
+            .into_iter()
+            .find(|spec| spec.id == "shared-pasteboard")
+            .unwrap();
+        let target = &spec.path;
         fs::create_dir_all(&target)?;
-        fs::write(target.join("stale-archive"), vec![7_u8; 8192])?;
-        let spec = CandidateSpec {
-            id: "pasteboard-test",
-            name: "pasteboard-test",
-            path: target.clone(),
-            description: "test",
-            kind: CandidateKind::Recommended,
-            policy: CleanupPolicy::StalePasteboardArchives {
-                min_age: Duration::ZERO,
-            },
-        };
+        fs::write(target.join("recent-archive"), vec![7_u8; 8192])?;
+        let metadata_path = target.parent().unwrap().join("current-pasteboard");
+        fs::write(&metadata_path, b"keep")?;
 
-        clean_candidate(&spec, &home)?;
+        let scan = scan_candidate(&spec);
+        assert!(scan.accessible());
+        assert!(!scan.open_handles);
+        assert!(scan.reclaimable_bytes > 0);
+        assert_eq!(clean_candidate(&spec, &home)?, scan.reclaimable_bytes);
         assert!(target.is_dir());
         assert_eq!(fs::read_dir(&target)?.count(), 0);
+        assert_eq!(fs::read(metadata_path)?, b"keep");
+        fs::remove_dir_all(home)?;
+        Ok(())
+    }
+
+    #[test]
+    fn pasteboard_cleanup_refuses_open_archives() -> Result<()> {
+        let home = test_dir("pasteboard-open");
+        let spec = default_candidates(&home)
+            .into_iter()
+            .find(|spec| spec.id == "shared-pasteboard")
+            .unwrap();
+        fs::create_dir_all(&spec.path)?;
+        let archive = spec.path.join("recent-archive");
+        let mut file = fs::File::create(&archive)?;
+        file.write_all(&[7_u8; 8192])?;
+
+        let scan = scan_candidate(&spec);
+        assert!(scan.open_handles);
+        assert_eq!(scan.reclaimable_bytes, 0);
+        assert!(clean_candidate(&spec, &home).is_err());
+        assert!(archive.exists());
+        drop(file);
         fs::remove_dir_all(home)?;
         Ok(())
     }
