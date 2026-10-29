@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Clean My Mac</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main>
+      <div class="toolbar">
+        <section class="overview" aria-label="磁盘空间">
+          <div><span>已用</span> <span id="used">—</span></div>
+          <div><span>可用</span> <span id="available">—</span></div>
+          <div><span>可清理</span> <span id="reclaimable">—</span></div>
+        </section>
+        <button id="rescan" type="button">重新扫描</button>
+      </div>
+      <div class="permission">
+        <span id="permission">完全磁盘访问：检查中</span>
+        <button id="settings" class="text-button" type="button">打开权限设置</button>
+      </div>
+      <p id="permission-hint" class="hint">请为 Clean My Mac 开启完全磁盘访问，授权后退出并重新打开 App。</p>
+      <p id="status" role="status" aria-live="polite">正在准备扫描…</p>
+      <section class="candidates" aria-label="清理项目" aria-busy="true">
+        <div class="table-heading"><span>清理项目</span><span>状态</span><span>可释放空间</span></div>
+        <div id="items"></div>
+      </section>
+      <footer>
+        <div class="selection-info"><strong id="selection">未选择项目</strong><span>删除将跳过废纸篓</span></div>
+        <button id="review" type="button" disabled>清理所选</button>
+      </footer>
+    </main>
+    <dialog id="confirmation" aria-labelledby="confirm-title" aria-describedby="confirm-description">
+      <h2 id="confirm-title">永久删除所选内容？</h2>
+      <p id="confirm-description">删除不会进入废纸篓，无法撤销。请先退出使用这些缓存的应用。</p>
+      <ul id="confirm-items"></ul>
+      <p id="confirm-total"></p>
+      <div class="dialog-actions">
+        <button id="cancel" type="button" autofocus>取消</button>
+        <button id="confirm" class="danger" type="button">确认永久删除</button>
+      </div>
+    </dialog>
+  </body>
+</html>

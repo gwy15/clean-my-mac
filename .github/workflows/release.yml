@@ -1,0 +1,94 @@
+name: Build and release macOS
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Apple Silicon app and CLI
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+      TARGET: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - name: Check and test
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+          npm test
+      - name: Build CLI
+        run: cargo build --release --locked --package clean-my-mac --bin clean-my-mac --target "$TARGET"
+      - name: Build desktop app
+        run: npm run build -- --target "$TARGET" --bundles app,dmg --ci -- --locked
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          tar -czf release/clean-my-mac-cli-macos-arm64.tar.gz -C "target/$TARGET/release" clean-my-mac
+          tar -czf release/clean-my-mac-app-macos-arm64.tar.gz -C "target/$TARGET/release/bundle/macos" "Clean My Mac.app"
+          cp "target/$TARGET/release/bundle/dmg/"*.dmg release/
+          (cd release && shasum -a 256 *.tar.gz *.dmg > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: release/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64
+          path: release
+      - name: Publish artifacts from this push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref_name }}
+          SOURCE_TYPE: ${{ github.ref_type }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          flags=(--prerelease --latest=false)
+          if [[ "$SOURCE_TYPE" == "tag" ]]; then
+            tag="$SOURCE_REF"
+            flags=(--latest)
+          fi
+          cat > notes.md <<'NOTES'
+          macOS 12+ · Apple Silicon (arm64)
+
+          - `.dmg`: desktop app installer
+          - `app-macos-arm64.tar.gz`: desktop app bundle
+          - `cli-macos-arm64.tar.gz`: original terminal CLI
+          - `SHA256SUMS.txt`: artifact checksums
+
+          The app uses ad-hoc signing and is not Apple-notarized. Full Disk Access must be granted to Clean My Mac for protected directories.
+          NOTES
+          printf '\nCommit: `%s`\n' "$SOURCE_SHA" >> notes.md
+          gh release create "$tag" release/* --target "$SOURCE_SHA" --title "Clean My Mac · $tag" --notes-file notes.md --draft "${flags[@]}"
+          gh release edit "$tag" --draft=false "${flags[@]}"

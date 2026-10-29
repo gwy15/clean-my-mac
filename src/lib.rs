@@ -719,7 +719,7 @@ mod tests {
             .find(|spec| spec.id == "shared-pasteboard")
             .unwrap();
         let target = &spec.path;
-        fs::create_dir_all(&target)?;
+        fs::create_dir_all(target)?;
         fs::write(target.join("recent-archive"), vec![7_u8; 8192])?;
         let metadata_path = target.parent().unwrap().join("current-pasteboard");
         fs::write(&metadata_path, b"keep")?;
@@ -730,7 +730,7 @@ mod tests {
         assert!(scan.reclaimable_bytes > 0);
         assert_eq!(clean_candidate(&spec, &home)?, scan.reclaimable_bytes);
         assert!(target.is_dir());
-        assert_eq!(fs::read_dir(&target)?.count(), 0);
+        assert_eq!(fs::read_dir(target)?.count(), 0);
         assert_eq!(fs::read(metadata_path)?, b"keep");
         fs::remove_dir_all(home)?;
         Ok(())
